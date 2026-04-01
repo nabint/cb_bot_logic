@@ -32,6 +32,7 @@ jobs:
         env:
           CONFIG__GIT_PROVIDER: github
           CONFIG__MODEL: ollama/qwen2.5-coder:latest
+          CONFIG__FALLBACK_MODELS: '["ollama/qwen2.5-coder:latest"]'
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "8192"
           CONFIG__DUPLICATE_EXAMPLES: "true"
           OLLAMA__API_BASE: http://localhost:11434
