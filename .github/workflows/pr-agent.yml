@@ -31,8 +31,8 @@ jobs:
         working-directory: /home/teslatech/pr-agent
         env:
           CONFIG__GIT_PROVIDER: github
-          CONFIG__MODEL: ollama/qwen2.5-coder:latest
-          CONFIG__FALLBACK_MODELS: '["ollama/qwen2.5-coder:latest"]'
+          CONFIG__MODEL: ollama/qwen2.5-coder:14b
+          CONFIG__FALLBACK_MODELS: '["ollama/qwen2.5-coder:14b"]'
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "12000"
           CONFIG__DUPLICATE_EXAMPLES: "true"
           CONFIG__USE_REPO_SETTINGS_FILE: "false"
