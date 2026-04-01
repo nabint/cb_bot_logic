@@ -1,0 +1,41 @@
+name: Qodo PR Agent (Ollama)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+jobs:
+  pr_agent:
+    name: Run PR Agent
+    runs-on: self-hosted
+
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # - name: Install PR-Agent
+
+      #   run: 
+      #     source /home/teslatech/pr-agent/qodo_venv/bin/activate
+      #     pip install pr-agent
+
+      - name: Run PR-Agent
+        working-directory: /home/teslatech/pr-agent
+        env:
+          CONFIG__GIT_PROVIDER: github
+          CONFIG__MODEL: ollama/qwen2.5-coder:latest
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "8192"
+          CONFIG__DUPLICATE_EXAMPLES: "true"
+          OLLAMA__API_BASE: http://localhost:11434
+          GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}   # ← reference only
+          GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}          # ← reference only
+        run:
+          qodo_venv/bin/python -m pr_agent.servers.github_action_runner

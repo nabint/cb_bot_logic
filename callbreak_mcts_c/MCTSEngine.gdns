@@ -1,0 +1,8 @@
+[gd_resource type="NativeScript" load_steps=2 format=2]
+
+[ext_resource path="res://src/World/Players/bot_logic/callbreak_mcts_c/mcts_engine.gdnlib" type="GDNativeLibrary" id=1]
+
+[resource]
+resource_name = "MCTSEngine"
+class_name = "MCTSEngine"
+library = ExtResource( 1 )
