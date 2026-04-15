@@ -21,11 +21,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug Config
+        run: |
+          echo "=== Repo root files ==="
+          ls -la $GITHUB_WORKSPACE/
+          echo "=== .pr_agent.toml content ==="
+          cat $GITHUB_WORKSPACE/.pr_agent.toml || echo "FILE NOT FOUND"
+          echo "=== GITHUB_WORKSPACE ==="
+          echo $GITHUB_WORKSPACE
+
       - name: Run PR-Agent
         env:
           PYTHONPATH: /home/teslatech/pr-agent
           CONFIG__GIT_PROVIDER: github
-          CONFIG__USE_REPO_SETTINGS_FILE: "true"   # ← enables .pr_agent.toml at root
+          CONFIG__USE_REPO_SETTINGS_FILE: "true"
+          CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS: "true"
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "12000"
+          CONFIG__DUPLICATE_EXAMPLES: "true"
+          CONFIG__USE_EXTRA_BAD_EXTENSIONS: "false"
+          CONFIG__PUBLISH_OUTPUT: "true"
+          CONFIG__PUBLISH_OUTPUT_PROGRESS: "true"
+          CONFIG__ENABLE_CUSTOM_LABELS: "false"
+          GITHUB__RATELIMIT_RETRIES: "5"
           OLLAMA__API_BASE: http://localhost:11434
           GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
