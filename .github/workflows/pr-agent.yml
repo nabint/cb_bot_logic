@@ -21,26 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # - name: Install PR-Agent
-
-      #   run: 
-      #     source /home/teslatech/pr-agent/qodo_venv/bin/activate
-      #     pip install pr-agent
-
       - name: Run PR-Agent
         env:
           PYTHONPATH: /home/teslatech/pr-agent
           CONFIG__GIT_PROVIDER: github
-          CONFIG__MODEL: ollama/qwen2.5-coder:14b
-          CONFIG__FALLBACK_MODELS: '["ollama/qwen2.5-coder:14b"]'
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "12000"
-          CONFIG__DUPLICATE_EXAMPLES: "true"
-          CONFIG__USE_REPO_SETTINGS_FILE: "false"
-          CONFIG__USE_EXTRA_BAD_EXTENSIONS: "false"
-          CONFIG__PUBLISH_OUTPUT: "true"
-          CONFIG__PUBLISH_OUTPUT_PROGRESS: "true"
-          CONFIG__ENABLE_CUSTOM_LABELS: "false"
-          GITHUB__RATELIMIT_RETRIES: "5"
+          CONFIG__USE_REPO_SETTINGS_FILE: "true"   # ← enables .pr_agent.toml at root
           OLLAMA__API_BASE: http://localhost:11434
           GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
