@@ -28,8 +28,8 @@ jobs:
       #     pip install pr-agent
 
       - name: Run PR-Agent
-        working-directory: /home/teslatech/pr-agent
         env:
+          PYTHONPATH: /home/teslatech/pr-agent
           CONFIG__GIT_PROVIDER: github
           CONFIG__MODEL: ollama/qwen2.5-coder:14b
           CONFIG__FALLBACK_MODELS: '["ollama/qwen2.5-coder:14b"]'
@@ -45,4 +45,4 @@ jobs:
           GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
         run:
-          qodo_venv/bin/python -m pr_agent.servers.github_action_runner
+          /home/teslatech/pr-agent/qodo_venv/bin/python -m pr_agent.servers.github_action_runner
