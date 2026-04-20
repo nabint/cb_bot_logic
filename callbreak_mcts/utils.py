@@ -15,7 +15,7 @@ from bid_logic import Suit, SUIT_MAP
 # -------------------------------------------------------------------------
 def card_list_diff(list1, list2):
     """Return cards in list1 that are not in list2 (set difference)."""
-    exclude = set(list2)
+    exclude = list(list2)
     return [card for card in list1 if card not in exclude]
 
 
