@@ -32,7 +32,7 @@ jobs:
 
       - name: Run PR-Agent
         env:
-          PYTHONPATH: /home/teslatech/pr-agent
+          PYTHONPATH: /home/teslatech/pr-agent:/home/teslatech/projects/teslatech/pr_rag
           CONFIG__GIT_PROVIDER: github
           CONFIG__USE_REPO_SETTINGS_FILE: "true"
           CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS: "true"
@@ -46,5 +46,5 @@ jobs:
           OLLAMA__API_BASE: http://localhost:11434
           GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
-        run:
-          /home/teslatech/pr-agent/qodo_venv/bin/python -m pr_agent.servers.github_action_runner
+        run: |
+          /home/teslatech/pr-agent/qodo_venv/bin/python /home/teslatech/pr-agent/custom_runner.py
