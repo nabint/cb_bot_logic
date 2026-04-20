@@ -88,15 +88,36 @@ def get_tracked_repo_diff(repo_path: str | Path = ".") -> str:
     return "\n".join(pieces)
 
 
+def resolve_diff_text(
+    *,
+    repo_path: str | Path,
+    diff_file: str | Path | None = None,
+) -> str:
+    if diff_file is not None:
+        return Path(diff_file).read_text(encoding="utf-8")
+
+    if not sys.stdin.isatty():
+        stdin_text = sys.stdin.read()
+        if stdin_text.strip():
+            return stdin_text
+
+    return get_tracked_repo_diff(repo_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Read tracked git diff from this repo and fetch relevant context from the rag_cb index."
+        description="Fetch relevant context from the rag_cb index using a passed diff or the tracked repo diff."
     )
     parser.add_argument("--repo", default=".", help="Repository root to inspect.")
     parser.add_argument("--db", default=None, help="Optional sqlite index path.")
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="SentenceTransformer model name.")
     parser.add_argument("--top-k", type=int, default=8, help="Number of semantic matches to return.")
     parser.add_argument("--per-file-top-k", type=int, default=2, help="Number of same-file semantic matches to return.")
+    parser.add_argument(
+        "--diff-file",
+        default=None,
+        help="Optional path to a git diff file. Reads stdin when piped; falls back to tracked diff otherwise.",
+    )
     parser.add_argument(
         "--auto-build",
         action="store_true",
@@ -109,9 +130,9 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    diff_text = get_tracked_repo_diff(args.repo)
+    diff_text = resolve_diff_text(repo_path=args.repo, diff_file=args.diff_file)
     if not diff_text.strip():
-        print("No tracked changes found outside rag_cb.")
+        print("No git diff content provided and no tracked changes found outside rag_cb.")
         return 0
 
     context = get_context(
@@ -124,7 +145,7 @@ def main() -> int:
         auto_build=args.auto_build,
     )
 
-    print(len(context.render()))
+    print(context.render())
     return 0
 
 

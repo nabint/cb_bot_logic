@@ -13,6 +13,7 @@ from .symbols import SymbolSpan, extract_symbol_spans, find_innermost_symbol, fi
 
 HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 DIFF_HEADER_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+QODO_FILE_HEADER_RE = re.compile(r"^.*?##\s+File:\s+['\"](.+?)['\"]\s*$")
 
 REASON_PRIORITY = {
     "changed_region": 0,
@@ -276,6 +277,7 @@ def parse_git_diff(git_diff: str) -> ParsedDiff:
     line_windows: dict[str, list[tuple[int, int]]] = defaultdict(list)
     current_path: str | None = None
     current_new_line: int | None = None
+    in_hunk = False
 
     for raw_line in git_diff.splitlines():
         line = raw_line.rstrip("\n")
@@ -286,6 +288,17 @@ def parse_git_diff(git_diff: str) -> ParsedDiff:
             current_path = new_path if new_path != "/dev/null" else old_path
             if current_path and current_path not in changed_files:
                 changed_files.append(current_path)
+            current_new_line = None
+            in_hunk = False
+            continue
+
+        qodo_match = QODO_FILE_HEADER_RE.match(line)
+        if qodo_match:
+            current_path = qodo_match.group(1)
+            if current_path and current_path not in changed_files:
+                changed_files.append(current_path)
+            current_new_line = None
+            in_hunk = False
             continue
 
         if line.startswith("+++ "):
@@ -293,6 +306,8 @@ def parse_git_diff(git_diff: str) -> ParsedDiff:
                 current_path = line[6:]
             if current_path and current_path not in changed_files:
                 changed_files.append(current_path)
+            current_new_line = None
+            in_hunk = False
             continue
 
         if current_path is None:
@@ -303,9 +318,18 @@ def parse_git_diff(git_diff: str) -> ParsedDiff:
             hunk_match = HUNK_HEADER_RE.match(line)
             if hunk_match:
                 current_new_line = max(1, int(hunk_match.group(1)))
+                in_hunk = True
             continue
 
         if line.startswith(("diff --git", "index ", "--- ")):
+            current_new_line = None
+            in_hunk = False
+            continue
+
+        if not in_hunk:
+            continue
+
+        if line == r"\ No newline at end of file":
             continue
 
         if line[:1] in {"+", "-", " "}:
@@ -324,6 +348,10 @@ def parse_git_diff(git_diff: str) -> ParsedDiff:
                 line_windows[current_path].append((affected_line, affected_line))
             else:
                 current_new_line += 1
+            continue
+
+        current_new_line = None
+        in_hunk = False
 
     if not changed_files and git_diff.strip():
         global_query = git_diff.strip()

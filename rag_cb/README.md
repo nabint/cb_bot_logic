@@ -39,6 +39,7 @@ print(context.render())
 - Retrieval prioritizes changed-region chunks, enclosing symbol context, exact symbol definitions/references/importers, and only then semantic fallback.
 - External exact matches are now module-aware for Python utility symbols, so same-name but unrelated local helpers are filtered out.
 - Callsite matches are returned as focused structural snippets around the actual usage line, and token budgeting spreads coverage across files before taking extra snippets from the same file.
+- The diff parser accepts both standard `git diff` text and Qodo-style PR summaries with sections like `## File: 'path/to/file.py'`.
 
 This makes function-local diffs behave differently from top-level constant or module-behavior changes.
 
@@ -70,8 +71,22 @@ To test against the current repo's tracked changes and fetch context from the ex
 python -m rag_cb.test_file --repo .
 ```
 
+To pass your own diff text instead of using tracked git changes:
+
+```bash
+cat /tmp/my.diff | python -m rag_cb.test_file --repo .
+python -m rag_cb.test_file --repo . --diff-file /tmp/my.diff
+```
+
 To retrieve tracked-diff context trimmed to a token budget:
 
 ```bash
 python -m rag_cb.test_limit_context --repo . --token-budget 10000
+```
+
+To trim context for a passed diff:
+
+```bash
+cat /tmp/my.diff | python -m rag_cb.test_limit_context --repo . --token-budget 10000
+python -m rag_cb.test_limit_context --repo . --token-budget 10000 --diff-file /tmp/my.diff
 ```
