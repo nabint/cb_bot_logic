@@ -124,7 +124,7 @@ def main() -> int:
         auto_build=args.auto_build,
     )
 
-    print(context.render())
+    print(len(context.render()))
     return 0
 
 

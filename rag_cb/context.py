@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .indexer import DEFAULT_MODEL_NAME, SentenceTransformerEncoder, default_db_path, index_repository
+from .snippets import extract_focus_snippets
 from .storage import CodeIndex, SearchHit, StoredChunk
 from .symbols import SymbolSpan, extract_symbol_spans, find_innermost_symbol, find_overlapping_symbols
 
@@ -170,7 +171,8 @@ def get_context(
                 index,
                 anchor,
                 repo_root=repo_root,
-                top_k=max(4, per_file_top_k * 3),
+                top_k=max(8, per_file_top_k * 6),
+                per_path_limit=max(1, per_file_top_k),
             )
             exact_matches = _filter_exact_matches(anchor, exact_matches)
             if not _has_strong_external_support(anchor, exact_matches):
@@ -451,6 +453,7 @@ def _find_exact_impact_matches(
     *,
     repo_root: Path,
     top_k: int,
+    per_path_limit: int,
 ) -> list[ContextMatch]:
     symbol_pattern = (
         re.compile(rf"\b{re.escape(anchor.name)}\b")
@@ -465,6 +468,7 @@ def _find_exact_impact_matches(
     definition_patterns = _definition_patterns(anchor)
     import_patterns = _import_patterns(anchor)
     file_cache: dict[str, tuple[str, list[SymbolSpan]]] = {}
+    import_support_cache: dict[str, bool] = {}
 
     candidates: list[ContextMatch] = []
     for chunk in index.fetch_chunks():
@@ -476,17 +480,35 @@ def _find_exact_impact_matches(
         if symbol_hits == 0 and not import_hit:
             continue
 
-        callsite_lines = _match_line_numbers(chunk, call_pattern) if call_pattern else []
+        file_text, _ = _load_file_symbols(chunk.path, repo_root, file_cache)
+        if _requires_import_evidence(anchor, chunk.path) and not _file_has_anchor_import(
+            anchor=anchor,
+            relative_path=chunk.path,
+            file_text=file_text,
+            import_patterns=import_patterns,
+            cache=import_support_cache,
+        ):
+            continue
+
+        callsite_lines = (
+            _match_line_numbers(
+                chunk,
+                call_pattern,
+                exclude_patterns=definition_patterns,
+            )
+            if call_pattern
+            else []
+        )
         if callsite_lines:
-            scoped_match = _build_callsite_scope_match(
+            scoped_matches = _build_callsite_scope_matches(
                 anchor=anchor,
                 chunk=chunk,
                 repo_root=repo_root,
                 file_cache=file_cache,
                 matched_lines=callsite_lines,
             )
-            if scoped_match is not None:
-                candidates.append(scoped_match)
+            if scoped_matches:
+                candidates.extend(scoped_matches)
                 continue
 
         if any(pattern.search(chunk.content) for pattern in definition_patterns):
@@ -523,71 +545,77 @@ def _find_exact_impact_matches(
             match.start_line,
         )
     )
-    return candidates[:top_k]
+    return _rank_exact_matches(
+        candidates,
+        top_k=top_k,
+        per_path_limit=per_path_limit,
+    )
 
 
 def _match_line_numbers(
     chunk: StoredChunk,
     pattern: re.Pattern[str] | None,
+    *,
+    exclude_patterns: list[re.Pattern[str]] | None = None,
 ) -> list[int]:
     if pattern is None:
         return []
 
     matched_lines: list[int] = []
     for offset, line in enumerate(chunk.content.splitlines()):
+        if exclude_patterns and any(exclude.search(line) for exclude in exclude_patterns):
+            continue
         if pattern.search(line):
             matched_lines.append(chunk.start_line + offset)
     return matched_lines
 
 
-def _build_callsite_scope_match(
+def _build_callsite_scope_matches(
     *,
     anchor: ImpactAnchor,
     chunk: StoredChunk,
     repo_root: Path,
     file_cache: dict[str, tuple[str, list[SymbolSpan]]],
     matched_lines: list[int],
-) -> ContextMatch | None:
-    file_text, symbols = _load_file_symbols(chunk.path, repo_root, file_cache)
+) -> list[ContextMatch]:
+    file_text, _ = _load_file_symbols(chunk.path, repo_root, file_cache)
     if not file_text:
-        return None
+        return []
 
-    enclosing_symbol: SymbolSpan | None = None
-    for line_number in matched_lines:
-        symbol = find_innermost_symbol(
-            symbols,
-            line_number,
-            line_number,
-            allowed_kinds={"function", "method", "class"},
-        )
-        if symbol is not None:
-            enclosing_symbol = symbol
-            break
-
-    if enclosing_symbol is None:
-        return None
-
-    if (
-        chunk.path == anchor.path
-        and enclosing_symbol.start_line == anchor.start_line
-        and enclosing_symbol.end_line == anchor.end_line
-    ):
-        return None
-
-    snippet = _slice_file_text(
+    snippets = extract_focus_snippets(
+        chunk.path,
         file_text,
-        start_line=enclosing_symbol.start_line,
-        end_line=enclosing_symbol.end_line,
+        matched_lines,
+        max_lines=16,
     )
-    return ContextMatch(
-        chunk_id=None,
-        path=chunk.path,
-        start_line=enclosing_symbol.start_line,
-        end_line=enclosing_symbol.end_line,
-        score=0.97,
-        reason="symbol_callsite",
-        content=snippet,
-    )
+    matches: list[ContextMatch] = []
+    seen_spans: set[tuple[int, int]] = set()
+
+    for snippet in snippets:
+        if (
+            chunk.path == anchor.path
+            and snippet.start_line <= anchor.end_line
+            and snippet.end_line >= anchor.start_line
+        ):
+            continue
+
+        span_key = (snippet.start_line, snippet.end_line)
+        if span_key in seen_spans:
+            continue
+        seen_spans.add(span_key)
+        matches.append(
+            ContextMatch(
+                chunk_id=None,
+                path=chunk.path,
+                start_line=snippet.start_line,
+                end_line=snippet.end_line,
+                score=0.97,
+                reason="symbol_callsite",
+                content=snippet.content,
+            )
+        )
+
+    return matches
 
 
 def _build_anchor_scope_match(
@@ -671,6 +699,13 @@ def _import_patterns(anchor: ImpactAnchor) -> list[re.Pattern[str]]:
         escaped_module = re.escape(module_name)
         patterns.append(re.compile(rf"\bimport\s+{escaped_module}\b"))
         patterns.append(re.compile(rf"\bfrom\s+{escaped_module}\s+import\b"))
+        if "." in module_name:
+            parent_module, leaf_module = module_name.rsplit(".", 1)
+            patterns.append(
+                re.compile(
+                    rf"\bfrom\s+{re.escape(parent_module)}\s+import\s+[^\n#]*\b{re.escape(leaf_module)}\b"
+                )
+            )
         if anchor.kind != "module":
             escaped_name = re.escape(anchor.name)
             patterns.append(
@@ -807,3 +842,78 @@ def _match_key(match: ContextMatch) -> str:
     if match.chunk_id is not None:
         return f"chunk:{match.chunk_id}"
     return f"span:{match.path}:{match.start_line}:{match.end_line}"
+
+
+def _requires_import_evidence(anchor: ImpactAnchor, candidate_path: str) -> bool:
+    if candidate_path == anchor.path:
+        return False
+    if Path(anchor.path).suffix.lower() != ".py":
+        return False
+    return anchor.kind in {"function", "class", "global"}
+
+
+def _file_has_anchor_import(
+    *,
+    anchor: ImpactAnchor,
+    relative_path: str,
+    file_text: str,
+    import_patterns: list[re.Pattern[str]],
+    cache: dict[str, bool],
+) -> bool:
+    cached = cache.get(relative_path)
+    if cached is not None:
+        return cached
+
+    has_import = any(pattern.search(file_text) for pattern in import_patterns)
+    cache[relative_path] = has_import
+    return has_import
+
+
+def _rank_exact_matches(
+    matches: list[ContextMatch],
+    *,
+    top_k: int,
+    per_path_limit: int,
+) -> list[ContextMatch]:
+    if not matches:
+        return []
+
+    sorted_matches = sorted(
+        matches,
+        key=lambda match: (
+            REASON_PRIORITY.get(match.reason, 99),
+            -match.score,
+            match.path,
+            match.start_line,
+        ),
+    )
+
+    grouped_matches: dict[str, list[ContextMatch]] = {}
+    path_order: list[str] = []
+    capped_limit = max(1, per_path_limit)
+
+    for match in sorted_matches:
+        if match.path not in grouped_matches:
+            grouped_matches[match.path] = []
+            path_order.append(match.path)
+        if len(grouped_matches[match.path]) >= capped_limit:
+            continue
+        grouped_matches[match.path].append(match)
+
+    ranked: list[ContextMatch] = []
+    depth = 0
+    while len(ranked) < top_k:
+        added_any = False
+        for path in path_order:
+            path_matches = grouped_matches[path]
+            if depth >= len(path_matches):
+                continue
+            ranked.append(path_matches[depth])
+            added_any = True
+            if len(ranked) >= top_k:
+                break
+        if not added_any:
+            break
+        depth += 1
+
+    return ranked

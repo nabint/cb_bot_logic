@@ -37,8 +37,25 @@ print(context.render())
 - If a change lands inside a function, method, or class, that enclosing symbol becomes the primary anchor.
 - If a change is at module scope, overlapping globals become anchors first; otherwise the file/module becomes the anchor.
 - Retrieval prioritizes changed-region chunks, enclosing symbol context, exact symbol definitions/references/importers, and only then semantic fallback.
+- External exact matches are now module-aware for Python utility symbols, so same-name but unrelated local helpers are filtered out.
+- Callsite matches are returned as focused structural snippets around the actual usage line, and token budgeting spreads coverage across files before taking extra snippets from the same file.
 
 This makes function-local diffs behave differently from top-level constant or module-behavior changes.
+
+## Context Budgeting
+
+`get_limited_context(...)` trims fetched RAG context to a token budget.
+
+- It preserves the most relevant matches first.
+- If a full block does not fit, it compacts the code block line-by-line and keeps the most important lines.
+- If `tiktoken` is installed it uses `cl100k_base` token counting; otherwise it falls back to a deterministic estimate.
+
+```python
+from rag_cb import get_limited_context
+
+limited = get_limited_context(diff_text, ".", token_budget=10000)
+print(limited.render())
+```
 
 ## CLI Usage
 
@@ -51,4 +68,10 @@ To test against the current repo's tracked changes and fetch context from the ex
 
 ```bash
 python -m rag_cb.test_file --repo .
+```
+
+To retrieve tracked-diff context trimmed to a token budget:
+
+```bash
+python -m rag_cb.test_limit_context --repo . --token-budget 10000
 ```
