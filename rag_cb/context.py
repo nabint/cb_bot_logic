@@ -17,11 +17,12 @@ REASON_PRIORITY = {
     "changed_region": 0,
     "enclosing_symbol": 1,
     "symbol_definition": 2,
-    "module_import": 3,
-    "symbol_reference": 4,
-    "same_file_context": 5,
-    "changed_file_semantic": 6,
-    "semantic_match": 7,
+    "symbol_callsite": 3,
+    "module_import": 4,
+    "symbol_reference": 5,
+    "same_file_context": 6,
+    "changed_file_semantic": 7,
+    "semantic_match": 8,
 }
 
 
@@ -161,35 +162,39 @@ def get_context(
                 f"but get_context is using {model_name}."
             )
 
-        collected_matches: dict[int, ContextMatch] = {}
-
-        for path, line_windows in parsed_diff.line_windows.items():
-            for start_line, end_line in line_windows:
-                _merge_matches(
-                    collected_matches,
-                    [
-                        _from_stored_chunk(chunk, score=1.0, reason="changed_region")
-                        for chunk in index.fetch_chunks_for_line_window(
-                            path,
-                            start_line,
-                            end_line,
-                            limit=3,
-                        )
-                    ],
-                )
+        collected_matches: dict[str, ContextMatch] = {}
+        supported_anchors: list[ImpactAnchor] = []
 
         for anchor in anchors:
-            _merge_matches(collected_matches, _find_anchor_local_context(index, anchor))
+            exact_matches = _find_exact_impact_matches(
+                index,
+                anchor,
+                repo_root=repo_root,
+                top_k=max(4, per_file_top_k * 3),
+            )
+            exact_matches = _filter_exact_matches(anchor, exact_matches)
+            if not _has_strong_external_support(anchor, exact_matches):
+                continue
+
+            supported_anchors.append(anchor)
             _merge_matches(
                 collected_matches,
-                _find_exact_impact_matches(
-                    index,
-                    anchor,
-                    top_k=max(4, per_file_top_k * 3),
-                ),
+                [_build_anchor_scope_match(anchor, repo_root, reason="changed_region", score=1.0)],
+            )
+            _merge_matches(
+                collected_matches,
+                _find_anchor_local_context(index, anchor, repo_root=repo_root),
+            )
+            _merge_matches(collected_matches, exact_matches)
+
+        if not supported_anchors:
+            return ContextBundle(
+                changed_files=parsed_diff.changed_files,
+                anchors=[],
+                matches=[],
             )
 
-        semantic_queries = [anchor.query_text for anchor in anchors if anchor.query_text.strip()]
+        semantic_queries = [anchor.query_text for anchor in supported_anchors if anchor.query_text.strip()]
         if not semantic_queries and parsed_diff.global_query.strip():
             semantic_queries = [parsed_diff.global_query]
 
@@ -201,9 +206,9 @@ def get_context(
                 embeddings = []
 
             if embeddings:
-                if anchors:
-                    semantic_limit = max(2, top_k // max(1, len(anchors)))
-                    for anchor, embedding in zip(anchors, embeddings):
+                if supported_anchors:
+                    semantic_limit = max(2, top_k // max(1, len(supported_anchors)))
+                    for anchor, embedding in zip(supported_anchors, embeddings):
                         hits = index.search(
                             embedding,
                             top_k=semantic_limit,
@@ -256,7 +261,7 @@ def get_context(
         )
         return ContextBundle(
             changed_files=parsed_diff.changed_files,
-            anchors=anchors,
+            anchors=supported_anchors,
             matches=final_matches,
         )
     finally:
@@ -417,7 +422,15 @@ def _build_anchor_query(symbol: SymbolSpan, path: str, diff_query: str) -> str:
     return "\n".join(parts)
 
 
-def _find_anchor_local_context(index: CodeIndex, anchor: ImpactAnchor) -> list[ContextMatch]:
+def _find_anchor_local_context(
+    index: CodeIndex,
+    anchor: ImpactAnchor,
+    *,
+    repo_root: Path,
+) -> list[ContextMatch]:
+    if anchor.kind != "module":
+        return [_build_anchor_scope_match(anchor, repo_root, reason="enclosing_symbol", score=0.995)]
+
     estimated_chunks = max(2, (max(1, anchor.end_line - anchor.start_line + 1) // 50) + 2)
     reason = "enclosing_symbol" if anchor.kind != "module" else "same_file_context"
     score = 0.995 if anchor.kind != "module" else 0.97
@@ -436,6 +449,7 @@ def _find_exact_impact_matches(
     index: CodeIndex,
     anchor: ImpactAnchor,
     *,
+    repo_root: Path,
     top_k: int,
 ) -> list[ContextMatch]:
     symbol_pattern = (
@@ -443,8 +457,14 @@ def _find_exact_impact_matches(
         if anchor.kind != "module"
         else None
     )
+    call_pattern = (
+        re.compile(rf"\b{re.escape(anchor.name)}\s*\(")
+        if anchor.kind in {"function", "method"}
+        else None
+    )
     definition_patterns = _definition_patterns(anchor)
     import_patterns = _import_patterns(anchor)
+    file_cache: dict[str, tuple[str, list[SymbolSpan]]] = {}
 
     candidates: list[ContextMatch] = []
     for chunk in index.fetch_chunks():
@@ -455,6 +475,19 @@ def _find_exact_impact_matches(
         import_hit = any(pattern.search(chunk.content) for pattern in import_patterns)
         if symbol_hits == 0 and not import_hit:
             continue
+
+        callsite_lines = _match_line_numbers(chunk, call_pattern) if call_pattern else []
+        if callsite_lines:
+            scoped_match = _build_callsite_scope_match(
+                anchor=anchor,
+                chunk=chunk,
+                repo_root=repo_root,
+                file_cache=file_cache,
+                matched_lines=callsite_lines,
+            )
+            if scoped_match is not None:
+                candidates.append(scoped_match)
+                continue
 
         if any(pattern.search(chunk.content) for pattern in definition_patterns):
             reason = "symbol_definition"
@@ -491,6 +524,128 @@ def _find_exact_impact_matches(
         )
     )
     return candidates[:top_k]
+
+
+def _match_line_numbers(
+    chunk: StoredChunk,
+    pattern: re.Pattern[str] | None,
+) -> list[int]:
+    if pattern is None:
+        return []
+
+    matched_lines: list[int] = []
+    for offset, line in enumerate(chunk.content.splitlines()):
+        if pattern.search(line):
+            matched_lines.append(chunk.start_line + offset)
+    return matched_lines
+
+
+def _build_callsite_scope_match(
+    *,
+    anchor: ImpactAnchor,
+    chunk: StoredChunk,
+    repo_root: Path,
+    file_cache: dict[str, tuple[str, list[SymbolSpan]]],
+    matched_lines: list[int],
+) -> ContextMatch | None:
+    file_text, symbols = _load_file_symbols(chunk.path, repo_root, file_cache)
+    if not file_text:
+        return None
+
+    enclosing_symbol: SymbolSpan | None = None
+    for line_number in matched_lines:
+        symbol = find_innermost_symbol(
+            symbols,
+            line_number,
+            line_number,
+            allowed_kinds={"function", "method", "class"},
+        )
+        if symbol is not None:
+            enclosing_symbol = symbol
+            break
+
+    if enclosing_symbol is None:
+        return None
+
+    if (
+        chunk.path == anchor.path
+        and enclosing_symbol.start_line == anchor.start_line
+        and enclosing_symbol.end_line == anchor.end_line
+    ):
+        return None
+
+    snippet = _slice_file_text(
+        file_text,
+        start_line=enclosing_symbol.start_line,
+        end_line=enclosing_symbol.end_line,
+    )
+    return ContextMatch(
+        chunk_id=None,
+        path=chunk.path,
+        start_line=enclosing_symbol.start_line,
+        end_line=enclosing_symbol.end_line,
+        score=0.97,
+        reason="symbol_callsite",
+        content=snippet,
+    )
+
+
+def _build_anchor_scope_match(
+    anchor: ImpactAnchor,
+    repo_root: Path,
+    *,
+    reason: str,
+    score: float,
+) -> ContextMatch:
+    file_text = _safe_read_text(repo_root / anchor.path)
+    snippet = _slice_file_text(
+        file_text,
+        start_line=anchor.start_line,
+        end_line=anchor.end_line,
+    )
+    return ContextMatch(
+        chunk_id=None,
+        path=anchor.path,
+        start_line=anchor.start_line,
+        end_line=anchor.end_line,
+        score=score,
+        reason=reason,
+        content=snippet,
+    )
+
+
+def _has_strong_external_support(
+    anchor: ImpactAnchor,
+    matches: list[ContextMatch],
+) -> bool:
+    strong_reasons = {
+        "function": {"symbol_callsite", "symbol_reference", "symbol_definition"},
+        "method": {"symbol_callsite", "symbol_reference", "symbol_definition"},
+        "class": {"symbol_reference", "symbol_definition"},
+        "global": {"symbol_reference", "symbol_definition", "module_import"},
+        "module": {"symbol_reference", "symbol_definition", "module_import"},
+    }.get(anchor.kind, {"symbol_reference", "symbol_definition"})
+
+    for match in matches:
+        if match.path == anchor.path:
+            continue
+        if match.reason in strong_reasons:
+            return True
+    return False
+
+
+def _filter_exact_matches(
+    anchor: ImpactAnchor,
+    matches: list[ContextMatch],
+) -> list[ContextMatch]:
+    if anchor.kind not in {"function", "method", "class"}:
+        return matches
+
+    return [
+        match
+        for match in matches
+        if match.reason != "module_import"
+    ]
 
 
 def _definition_patterns(anchor: ImpactAnchor) -> list[re.Pattern[str]]:
@@ -578,6 +733,31 @@ def _safe_read_text(path: Path) -> str:
         return ""
 
 
+def _load_file_symbols(
+    relative_path: str,
+    repo_root: Path,
+    cache: dict[str, tuple[str, list[SymbolSpan]]],
+) -> tuple[str, list[SymbolSpan]]:
+    cached = cache.get(relative_path)
+    if cached is not None:
+        return cached
+
+    file_path = repo_root / relative_path
+    file_text = _safe_read_text(file_path)
+    symbols = extract_symbol_spans(relative_path, file_text) if file_text else []
+    cache[relative_path] = (file_text, symbols)
+    return cache[relative_path]
+
+
+def _slice_file_text(file_text: str, *, start_line: int, end_line: int) -> str:
+    lines = file_text.splitlines()
+    if not lines:
+        return ""
+    start_index = max(0, start_line - 1)
+    end_index = min(len(lines), end_line)
+    return "\n".join(lines[start_index:end_index]).rstrip()
+
+
 def _from_search_hit(hit: SearchHit, *, reason: str) -> ContextMatch:
     return ContextMatch(
         chunk_id=hit.chunk_id,
@@ -603,23 +783,27 @@ def _from_stored_chunk(chunk: StoredChunk, *, score: float, reason: str) -> Cont
 
 
 def _merge_matches(
-    collected_matches: dict[int, ContextMatch],
+    collected_matches: dict[str, ContextMatch],
     candidates: Iterable[ContextMatch],
 ) -> None:
     for candidate in candidates:
-        if candidate.chunk_id is None:
-            continue
-
-        existing = collected_matches.get(candidate.chunk_id)
+        key = _match_key(candidate)
+        existing = collected_matches.get(key)
         if existing is None:
-            collected_matches[candidate.chunk_id] = candidate
+            collected_matches[key] = candidate
             continue
 
         existing_priority = REASON_PRIORITY.get(existing.reason, 99)
         candidate_priority = REASON_PRIORITY.get(candidate.reason, 99)
         if candidate_priority < existing_priority:
-            collected_matches[candidate.chunk_id] = candidate
+            collected_matches[key] = candidate
             continue
 
         if candidate_priority == existing_priority and candidate.score > existing.score:
-            collected_matches[candidate.chunk_id] = candidate
+            collected_matches[key] = candidate
+
+
+def _match_key(match: ContextMatch) -> str:
+    if match.chunk_id is not None:
+        return f"chunk:{match.chunk_id}"
+    return f"span:{match.path}:{match.start_line}:{match.end_line}"
