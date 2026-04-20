@@ -1,53 +1,68 @@
 [config]
 
-model = "ollama/qwen2.5-coder:14b"
-fallback_models = ["ollama/qwen2.5-coder:14b"]
+# MODEL
+model = "ollama/deepseek-r1-16k"
+fallback_models = ["ollama/deepseek-r1-16k"]
 
 temperature = 0.0
 seed = 42
 
-custom_model_max_tokens = 12000
-max_model_tokens = 18000
-model_token_count_estimate_factor = 0.6
+# MAX CONTEXT FOR DEEP REVIEW
+custom_model_max_tokens = 24000
+max_model_tokens = 28000
+model_token_count_estimate_factor = 0.9
 
 publish_output = true
 publish_output_progress = true
 
+# Enable examples
 duplicate_prompt_examples = true
-verbosity_level = 3   # more detailed reasoning output
+
+verbosity_level = 3
 
 use_repo_settings_file = true
 use_global_settings_file = false
 use_wiki_settings_file = false
 
-# ⚙️ OLLAMA COMPATIBILITY
-custom_reasoning_model = true
-ai_timeout = 900   # ↑ allow longer reasoning
+# OLLAMA SETTINGS
+custom_reasoning_model = false
+ai_timeout = 7200
 
-# 📦 PATCH CONTROL (MORE CONTEXT = BETTER THINKING)
+# PATCH HANDLING
 allow_dynamic_context = true
-large_patch_policy = "clip"
 
-max_commits_tokens = 800
-max_description_tokens = 800
+large_patch_policy = "split"
 
+max_commits_tokens = 8000
+max_description_tokens = 4000
+
+# Increase context around changes
+max_extra_files = 30
 patch_extra_lines_before = 30
 patch_extra_lines_after = 30
 
-patch_extension_skip_types = [
-  ".md", ".txt", ".json", ".import", ".cfg", ".lock"
-]
+patch_extension_skip_types = [".lock"]
 
-# 🧹 NOISE REDUCTION
-ignore_pr_title = ["^\\[Auto\\]", "^Auto"]
-
-enable_ai_metadata = false
+# ANALYSIS QUALITY
+enable_ai_metadata = true
 reasoning_effort = "high"
 
-log_level = "INFO"
+# enable_ai_metadata = true
+dump_prompts = true
+# verbosity_level = 3
+
+log_level = "DEBUG"
 
 
-# RIGOROUS GODOT REVIEWER (DEEP THINKING)
+[context]
+enabled = true
+max_context_tokens = 12000
+
+# SMART PATCH STRATEGY
+patch_strategy = "smart"
+
+
+# PYTHON-SPECIFIC REVIEW
 [pr_reviewer]
 
 require_security_review = true
@@ -55,139 +70,86 @@ require_tests_review = true
 require_todo_scan = true
 
 num_max_findings = 25
+
 final_update_message = true
 persistent_comment = true
 
-extra_instructions = """
-You are a senior Godot engine and gameplay systems engineer performing a STRICT, DEEP, multi-pass production code review.
-
-CRITICAL OUTPUT RULES:
-- Output MUST be valid YAML only
-- DO NOT use ``` blocks
-- DO NOT output diff format
-- DO NOT include '---' separators
-- Use consistent YAML structure
-
-THINKING PROCESS (MANDATORY):
-- First build a mental model of the system
-- Then analyze interactions between files
-- Then identify edge cases and hidden bugs
-- Only then produce findings
-
-For EACH issue:
-1. What is wrong
-2. Why it is wrong
-3. Runtime impact (crash, desync, performance, etc.)
-4. When it will break (edge cases)
-5. Suggested fix (brief)
-
-========================================
-1. CRITICAL BUG DETECTION
-========================================
-- Invalid signal names (e.g., "pressd")
-- Broken/missing signal connections
-- Incorrect signal signatures
-- Null node access
-- Access before _ready
-- await/yield misuse
-- Async race conditions
-- Multiplayer desync risks
-
-========================================
-2. GODOT ENGINE MISUSE
-========================================
-- Wrong lifecycle usage
-- Heavy _process usage
-- Missing queue_free()
-- Scene tree misuse
-- Resource leaks
-
-========================================
-3. PERFORMANCE (VERY IMPORTANT)
-========================================
-- Per-frame heavy operations
-- Repeated get_node()
-- Deep traversal
-- Blocking main thread
-
-========================================
-4. GAME LOGIC & STATE
-========================================
-- State inconsistencies
-- UI visibility bugs (modulate alpha)
-- Input race conditions
-- Animation mismatch
-- Edge cases
-
-========================================
-5. CROSS-FILE ISSUES
-========================================
-- Inconsistent assumptions between files
-- Broken contracts between nodes
-
-========================================
-OUTPUT RULES:
-========================================
-- Only high-impact issues
-- No fluff
-- No praise
-- No generic advice
-"""
-
-enable_review_labels_effort = false
+enable_review_labels_effort = true
 enable_review_labels_security = true
+
+# Multi-pass reasoning
+max_ai_calls = 6
+max_number_of_calls = 6
+
+
+# PYTHON-SPECIFIC PROMPT
+extra_instructions = """ """
 
 
 # PR DESCRIPTION
 [pr_description]
 
-enable_help_text = false
-publish_labels = false
-generate_ai_title = false
+enable_help_text = true
+publish_labels = true
+generate_ai_title = true
 enable_pr_diagram = false
 
 use_bullet_points = true
 enable_pr_type = true
 
-# enable deeper reasoning passes
-async_ai_calls = true
-max_ai_calls = 4
+# Sequential only 
+async_ai_calls = false
+
+# Multi-pass reasoning
+max_ai_calls = 8
+max_number_of_calls = 7
 
 
+# QUESTIONS
 [pr_questions]
 
-enable_help_text = false
+enable_help_text = true
 use_conversation_history = true
 
 
+# CODE SUGGESTIONS
 [pr_code_suggestions]
 
 commitable_code_suggestions = false
-focus_only_on_problems = true
 
-max_number_of_calls = 4
+focus_only_on_problems = false
+
+max_number_of_calls = 6
 parallel_calls = false
 
 publish_output_no_suggestions = true
-suggestions_score_threshold = 5
+suggestions_score_threshold = 6
+
+# IMPORTANT FOR LOCAL MODEL
+self_reflect_on_suggestions = true
 
 
-# 🧠 GITHUB INTEGRATION
+# GITHUB
 [github]
 
 deployment_type = "user"
-ratelimit_retries = 5
+
+ratelimit_retries = 10
 
 publish_inline_comments_fallback_with_verification = true
 try_fix_invalid_inline_comments = true
 
 
-# ⚙️ ACTION CONFIG
+# GITHUB ACTION
 [github_action_config]
-handle_push_trigger = false
+
+auto_review = true
+auto_describe = true
+auto_improve = true
+
+handle_push_trigger = true
 
 
-# 🔌 LITELLM
+# LITELLM
 [litellm]
-
-enable_callbacks = false
+enable_callbacks = true
