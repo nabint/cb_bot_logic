@@ -47,4 +47,5 @@ jobs:
           GITHUB__USER_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
         run: |
+          export PYTHONPATH=/home/teslatech/pr-agent:/home/teslatech/projects/teslatech
           /home/teslatech/pr-agent/qodo_venv/bin/python /home/teslatech/pr-agent/custom_runner.py
