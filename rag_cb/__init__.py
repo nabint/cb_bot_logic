@@ -1,4 +1,4 @@
-from .context import ContextBundle, ContextMatch, get_context
+from .context import ContextBundle, ContextMatch, ImpactAnchor, get_context
 from .indexer import (
     DEFAULT_DB_DIRNAME,
     DEFAULT_MODEL_NAME,
@@ -11,6 +11,7 @@ from .indexer import (
 __all__ = [
     "ContextBundle",
     "ContextMatch",
+    "ImpactAnchor",
     "DEFAULT_DB_DIRNAME",
     "DEFAULT_MODEL_NAME",
     "IndexStats",

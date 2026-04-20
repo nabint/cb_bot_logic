@@ -56,7 +56,8 @@ log_level = "DEBUG"
 
 [context]
 enabled = true
-max_context_tokens = 12000
+print_context = true
+max_context_tokens = 20000
 
 # SMART PATCH STRATEGY
 patch_strategy = "smart"
