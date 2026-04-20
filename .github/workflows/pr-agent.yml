@@ -32,7 +32,7 @@ jobs:
 
       - name: Run PR-Agent
         env:
-          PYTHONPATH: /home/teslatech/pr-agent:/home/teslatech/projects/teslatech/pr_rag
+          PYTHONPATH: /home/teslatech/pr-agent:/home/teslatech/projects/teslatech
           CONFIG__GIT_PROVIDER: github
           CONFIG__USE_REPO_SETTINGS_FILE: "true"
           CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS: "true"
