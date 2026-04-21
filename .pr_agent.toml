@@ -53,6 +53,8 @@ dump_prompts = true
 
 log_level = "DEBUG"
 
+output_relevant_configurations = false
+
 
 [context]
 enabled = true
@@ -66,17 +68,17 @@ patch_strategy = "smart"
 # PYTHON-SPECIFIC REVIEW
 [pr_reviewer]
 
-require_security_review = true
-require_tests_review = true
-require_todo_scan = true
+require_security_review = false
+require_tests_review = false
+require_todo_scan = false
 
 num_max_findings = 25
 
 final_update_message = true
 persistent_comment = true
 
-enable_review_labels_effort = true
-enable_review_labels_security = true
+enable_review_labels_effort = false
+enable_review_labels_security = false
 
 # Multi-pass reasoning
 max_ai_calls = 6
@@ -90,7 +92,7 @@ extra_instructions = """ """
 # PR DESCRIPTION
 [pr_description]
 
-enable_help_text = true
+enable_help_text = false
 publish_labels = true
 generate_ai_title = true
 enable_pr_diagram = false
@@ -108,17 +110,14 @@ max_number_of_calls = 7
 
 # QUESTIONS
 [pr_questions]
-
-enable_help_text = true
+enable_help_text = false
 use_conversation_history = true
 
 
 # CODE SUGGESTIONS
 [pr_code_suggestions]
-
 commitable_code_suggestions = false
-
-focus_only_on_problems = false
+focus_only_on_problems = true
 
 max_number_of_calls = 6
 parallel_calls = false
