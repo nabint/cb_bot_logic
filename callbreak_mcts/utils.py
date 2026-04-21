@@ -70,7 +70,7 @@ def get_winning_card(played_cards):
         elif card_suit == best_suit and card_rank > best_rank:
             best_card, best_rank, best_idx = card, card_rank, i
 
-    return best_card, best_idx
+    return  best_idx, best_card
 
 
 # -------------------------------------------------------------------------
